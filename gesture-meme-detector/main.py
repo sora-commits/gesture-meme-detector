@@ -11,7 +11,6 @@ warnings.filterwarnings("ignore")
 
 # ===================== ПУТИ =====================
 BASE_DIR = Path(__file__).parent.absolute()
-
 hand_model_path = BASE_DIR / "hand_landmarker.task"
 face_model_path = BASE_DIR / "face_landmarker.task"
 
@@ -23,18 +22,21 @@ FaceLandmarker = vision.FaceLandmarker
 FaceLandmarkerOptions = vision.FaceLandmarkerOptions
 VisionRunningMode = vision.RunningMode
 
-# Мемы
-memes = {
-    "neutral": None,
-    "hamster": cv2.imread("memes/hamster.jpg"),
-    "girl": cv2.imread("memes/girl.jpg"),
-    "cat": cv2.imread("memes/cat.jpg"),
-    "sonic": cv2.imread("memes/sonic.jpg"),
-    "shrug": cv2.imread("memes/shrug.jpg"),
-    "dog": cv2.imread("memes/dog.jpg"),
-}
+# Загрузка мемов с проверкой
+memes = {}
+meme_names = ["hamster", "girl", "cat", "sonic", "shrug", "dog"]
 
-gesture_buffer = deque(maxlen=10)
+for name in meme_names:
+    path = BASE_DIR / "memes" / f"{name}.jpg"
+    img = cv2.imread(str(path))
+    if img is not None:
+        memes[name] = img
+        print(f"✓ Загружен: {name}.jpg")
+    else:
+        print(f"⚠ Не найден: {name}.jpg")
+        memes[name] = None
+
+gesture_buffer = deque(maxlen=12)
 current_gesture = "neutral"
 
 # ===================== МОДЕЛИ =====================
@@ -54,7 +56,7 @@ cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-print("✅ Запущено!")
+print("✅ Программа запущена!")
 
 try:
     with HandLandmarker.create_from_options(hand_options) as hand_landmarker, \
@@ -77,10 +79,8 @@ try:
             face_result = face_landmarker.detect(mp_image)
             if face_result.face_landmarks:
                 lm = face_result.face_landmarks[0]
-                # Язык → Кот
                 if lm[14].y - lm[13].y > 0.045 or lm[15].y - lm[13].y > 0.04:
                     detected = "cat"
-                # Смотр в сторону → Собака
                 if abs(lm[1].x - 0.5) > 0.09:
                     detected = "dog"
 
@@ -90,25 +90,19 @@ try:
                 for hand_lm in hand_result.hand_landmarks:
                     lm = hand_lm
                     
-                    # Трекинг рук (видимый)
+                    # Трекинг рук
                     for i, landmark in enumerate(lm):
                         x = int(landmark.x * w)
                         y = int(landmark.y * h)
                         cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
 
-                    # Подсчёт поднятых пальцев
-                    fingers_up = 0
-                    if lm[8].y < lm[6].y:   fingers_up += 1
-                    if lm[12].y < lm[10].y: fingers_up += 1
-                    if lm[16].y < lm[14].y: fingers_up += 1
-                    if lm[20].y < lm[18].y: fingers_up += 1
+                    fingers_up = sum(1 for i in [8,12,16,20] if lm[i].y < lm[i-2].y)
 
                     if fingers_up == 1:
                         detected = "girl"
                     elif fingers_up == 2:
                         detected = "hamster"
 
-            # Две руки
             num_hands = len(hand_result.hand_landmarks) if hand_result.hand_landmarks else 0
             if num_hands >= 2:
                 if all(hand[0].y < 0.4 for hand in hand_result.hand_landmarks):
@@ -121,15 +115,16 @@ try:
             final_gesture = max(set(gesture_buffer), key=gesture_buffer.count)
             current_gesture = final_gesture
 
-            # Отображение
-            if current_gesture in memes and memes[current_gesture] is not None:
-                meme = cv2.resize(memes[current_gesture], (w//2, h))
-                combined = np.hstack((meme, frame))
+            # === ОТОБРАЖЕНИЕ МЕМА ===
+            meme_img = memes.get(current_gesture)
+            if meme_img is not None:
+                meme = cv2.resize(meme_img, (w//2, h))
             else:
-                left = np.zeros((h, w//2, 3), dtype=np.uint8)
-                cv2.putText(left, current_gesture.upper(), (70, h//2), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255,255,255), 3)
-                combined = np.hstack((left, frame))
+                meme = np.zeros((h, w//2, 3), dtype=np.uint8)
+                cv2.putText(meme, current_gesture.upper(), (60, h//2), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.5, (100, 100, 255), 3)
+
+            combined = np.hstack((meme, frame))
 
             cv2.imshow("Gesture Meme Detector", combined)
 
