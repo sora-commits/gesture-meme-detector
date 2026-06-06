@@ -5,7 +5,15 @@ from mediapipe.tasks.python import vision
 import numpy as np
 from collections import deque
 import warnings
+from pathlib import Path
+
 warnings.filterwarnings("ignore")
+
+# ===================== ПУТИ =====================
+BASE_DIR = Path(__file__).parent.absolute()
+
+hand_model_path = BASE_DIR / "hand_landmarker.task"
+face_model_path = BASE_DIR / "face_landmarker.task"
 
 # ===================== НАСТРОЙКИ =====================
 BaseOptions = mp.tasks.BaseOptions
@@ -31,13 +39,13 @@ current_gesture = "neutral"
 
 # ===================== МОДЕЛИ =====================
 hand_options = HandLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path="hand_landmarker.task"),
+    base_options=BaseOptions(model_asset_path=str(hand_model_path)),
     running_mode=VisionRunningMode.IMAGE,
     num_hands=2
 )
 
 face_options = FaceLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path="face_landmarker.task"),
+    base_options=BaseOptions(model_asset_path=str(face_model_path)),
     running_mode=VisionRunningMode.IMAGE,
     num_faces=1
 )
@@ -69,26 +77,26 @@ try:
             face_result = face_landmarker.detect(mp_image)
             if face_result.face_landmarks:
                 lm = face_result.face_landmarks[0]
-
+                # Язык → Кот
                 if lm[14].y - lm[13].y > 0.045 or lm[15].y - lm[13].y > 0.04:
                     detected = "cat"
-
-                nose_x = lm[1].x
-                if abs(nose_x - lm[33].x) > 0.085 or abs(nose_x - lm[263].x) > 0.085:
+                # Смотр в сторону → Собака
+                if abs(lm[1].x - 0.5) > 0.09:
                     detected = "dog"
 
-            # === РУКИ + ТРЕКИНГ ===
+            # === РУКИ ===
             hand_result = hand_landmarker.detect(mp_image)
-            num_hands = len(hand_result.hand_landmarks) if hand_result.hand_landmarks else 0
-
             if hand_result.hand_landmarks:
                 for hand_lm in hand_result.hand_landmarks:
                     lm = hand_lm
+                    
+                    # Трекинг рук (видимый)
                     for i, landmark in enumerate(lm):
                         x = int(landmark.x * w)
                         y = int(landmark.y * h)
-                        cv2.circle(frame, (x, y), 6, (0, 255, 0), -1)
+                        cv2.circle(frame, (x, y), 5, (0, 255, 0), -1)
 
+                    # Подсчёт поднятых пальцев
                     fingers_up = 0
                     if lm[8].y < lm[6].y:   fingers_up += 1
                     if lm[12].y < lm[10].y: fingers_up += 1
@@ -100,14 +108,12 @@ try:
                     elif fingers_up == 2:
                         detected = "hamster"
 
-            if num_hands >= 2 and face_result.face_landmarks and detected in ["neutral", "dog"]:
-                lm_face = face_result.face_landmarks[0]
-                face_top = lm_face[10].y
-                face_center = lm_face[0].y
-
-                if all(hand_lm[0].y < face_top + 0.18 for hand_lm in hand_result.hand_landmarks):
+            # Две руки
+            num_hands = len(hand_result.hand_landmarks) if hand_result.hand_landmarks else 0
+            if num_hands >= 2:
+                if all(hand[0].y < 0.4 for hand in hand_result.hand_landmarks):
                     detected = "sonic"
-                elif all(hand_lm[0].y > face_center - 0.05 for hand_lm in hand_result.hand_landmarks):
+                elif all(hand[0].y > 0.55 for hand in hand_result.hand_landmarks):
                     detected = "shrug"
 
             # Сглаживание
@@ -121,13 +127,13 @@ try:
                 combined = np.hstack((meme, frame))
             else:
                 left = np.zeros((h, w//2, 3), dtype=np.uint8)
-                cv2.putText(left, "neutral", (80, h//2), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (180, 180, 180), 4)
+                cv2.putText(left, current_gesture.upper(), (70, h//2), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.6, (255,255,255), 3)
                 combined = np.hstack((left, frame))
 
             cv2.imshow("Gesture Meme Detector", combined)
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q') or key == ord('Q') or key == 27:  # 27 = ESC
+            if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
 except Exception as e:
